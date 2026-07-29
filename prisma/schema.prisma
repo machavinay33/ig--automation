@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Postgres — required for deployment on Netlify/Render/Vercel etc.
+  // (SQLite's local file doesn't survive serverless/ephemeral filesystems.)
+  // Point DATABASE_URL at a Render Postgres instance, Neon, Supabase, etc.
+  // For pure local dev without any external DB, you can switch this back to
+  // "sqlite" temporarily.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  role          Role     @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscription    Subscription?
+  instagramAccounts InstagramAccount[]
+}
+
+model Subscription {
+  id            String             @id @default(cuid())
+  userId        String             @unique
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        SubscriptionStatus @default(TRIALING)
+  planAmountRs  Int                @default(5)
+  trialEndsAt   DateTime
+  currentPeriodEnd DateTime?
+  // Populated once real payments (Razorpay/Stripe) are wired up.
+  paymentProvider String?
+  providerCustomerId String?
+  providerSubscriptionId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model InstagramAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  igUserId          String   // Instagram-scoped user id from Meta
+  username          String
+  // Long-lived access token from Instagram Graph API (encrypt in real prod use).
+  accessToken       String
+  connectedAt       DateTime @default(now())
+
+  rules             AutoReplyRule[]
+  commentLogs       CommentLog[]
+
+  @@unique([userId, igUserId])
+}
+
+model AutoReplyRule {
+  id                  String            @id @default(cuid())
+  instagramAccountId  String
+  instagramAccount    InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  name                String
+  // Comma-separated keywords to match in the comment text. Empty = match all comments.
+  keywords            String            @default("")
+  replyTemplate       String
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+model CommentLog {
+  id                  String            @id @default(cuid())
+  instagramAccountId  String
+  instagramAccount    InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  commentId           String
+  commenterUsername   String?
+  commentText         String
+  matchedRuleId       String?
+  replyText           String?
+  status              String            @default("received") // received | replied | skipped | failed
+  createdAt           DateTime          @default(now())
+}
